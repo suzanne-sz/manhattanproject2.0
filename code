@@ -7,6 +7,9 @@ library(e1071)
 library(nnet)
 library(randomForest)
 setwd("C:/Users/OttoNooitgedacht/Downloads/bda2019image/images_split/")
+library(entropy)
+library(diptest)
+library(gbm)
 
 dir("/images_split/")
 
@@ -21,6 +24,7 @@ str(rivers)
 str(sunsets)
 str(trees)
 str(test_set)
+
 
 img = readJPEG(rivers[4])
 glimpse(img)
@@ -82,7 +86,11 @@ myFeatures  <- . %>% # starting with '.' defines the pipe to be a function
     #aantal pieken
     peakx = length(diff(pixel_value)==0),
     #scheefheid van het totale palet naar hogere of lagere waarden
-    skew = skewness(pixel_value)
+    skew = skewness(pixel_value),
+    entropy = entropy(pixel_value),
+    bimod = as.numeric(diptest::dip.test(pixel_value)$statistic)
+    power = mean(pixel_value^2)
+
 )
           
 
@@ -165,13 +173,16 @@ trcntr <- trainControl('cv', number = 5, p = 0.8)
 fit_knns <- train(category ~ ., Train %>% select(-file), method = "knn", trControl = trcntr, preProcess = 'scale')
 fit_knn <- train(category ~ ., Train %>% select(-file), method = "knn", trControl = trcntr)
 fit_lda <- train(category ~ ., Train %>% select(-file), method = "lda", trControl = trcntr)
-fit_dda <- train(category ~ ., Train %>% select(-file), method = "dda", trControl = trcntr)
+fit_boost = gbm(category ~ ., Train %>% select(-file), distribution="multinomial", n.trees=5000,
+                interaction.depth=4)
+fit_rf <- train(category ~ ., Train %>% select(-file), method = "rf", trControl = trcntr)
+fit_tree = train(category ~ ., Train %>% select(-file), method='rpart', trControl = trcntr)
 #fit_multi <- nnet::multinom(category ~ ., data = Train) , werkt niet?
 
 
 
 #plot the three models to see which performs best
-models <- list(knns = fit_knns, knn = fit_knn, lda = fit_lda, rpary = fittree, ranfor = ran.for, dda=fit_dda) 
+models <- list(knns = fit_knns, knn = fit_knn, lda = fit_lda, tree = fit_tree, boost = fit_boost, rf = fit_rf) 
 acc <- sapply(models, function(mdl) max(mdl$results$Accuracy)) 
 barplot(acc, horiz=T, las=1, col = 1 + (acc >= max(acc)))
 
