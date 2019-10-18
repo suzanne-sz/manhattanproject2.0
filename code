@@ -1,1 +1,177 @@
 code
+library(tidyverse)
+library(jpeg)
+library(caret)
+library(gridExtra)
+library(e1071) 
+library(nnet)
+library(randomForest)
+setwd("C:/Users/OttoNooitgedacht/Downloads/bda2019image/images_split/")
+
+dir("/images_split/")
+
+skies = dir("cloudy_sky/", full.names = TRUE)
+rivers = dir("rivers/", full.names = TRUE)
+sunsets = dir("sunsets/", full.names = TRUE)
+trees = dir("trees_and_forest/", full.names = TRUE)
+test_set = dir("test_set/", full.names = TRUE)
+
+str(skies)
+str(rivers)
+str(sunsets)
+str(trees)
+str(test_set)
+
+img = readJPEG(rivers[4])
+glimpse(img)
+
+paintImage = function(img,..., colors=1:3){img[,,-colors]=0; rasterImage(img,...)}
+
+
+# array dimensions
+d = dim(img) 
+
+# add names to the array dimensions
+dimnames(img) = list(x = 1:d[1], y = 1:d[2], color = c('r','g','b')) 
+
+# turn array into a data frame 
+as.table(img) %>% 
+  as.data.frame(stringsAsFactors = FALSE)
+
+readJPEG_as_df <- function(path, featureExtractor = I) {
+  img = readJPEG(path)
+  
+  d = dim(img) 
+  dimnames(img) = list(x = 1:d[1], y = 1:d[2], color = c('r','g','b')) # add dimnames 
+  
+  # next, turn array into a data frame 
+  df  <- 
+    as.table(img) %>% 
+    as.data.frame(stringsAsFactors = FALSE) %>% 
+    mutate(file = basename(path), x = as.numeric(x)-1, y = as.numeric(y)-1) %>%
+    mutate(pixel_id = x + d[1] * y) %>% 
+    rename(pixel_value = Freq) %>%
+    select(file, pixel_id, x, y, color, pixel_value)
+  
+  # extract features 
+  df %>%
+    featureExtractor
+}
+
+for (i in 3:10){
+nr = nc = i
+myFeatures  <- . %>% # starting with '.' defines the pipe to be a function 
+  group_by(file, X=cut(x, nr, labels = FALSE)-1, Y=cut(y, nc, labels=FALSE)-1, color) %>%
+  summarise(
+    m = mean(pixel_value),
+    s = sd(pixel_value),
+    min = min(pixel_value),
+    max = max(pixel_value),
+    q25 = quantile(pixel_value, .25),
+    q75 = quantile(pixel_value, .75),
+    #lag voor verandering
+    AR = cor(pixel_value, lag(pixel_value), use = "pairwise"),
+    #smalheid van de grootste piek
+    kur = kurtosis(pixel_value),
+    #lage pixelwaarden voor een kleur
+    low = length(pixel_value[pixel_value>=.0 & pixel_value<0.33]),
+    #mid pixelwaarden voor kleur
+    mid = length(pixel_value[pixel_value>=.33 & pixel_value<.66]),
+    #hoge pixelwaarden voor kleur
+    high = length(pixel_value[pixel_value>=.66 & pixel_value<1]),
+    #aantal pieken
+    peakx = length(diff(pixel_value)==0),
+    #scheefheid van het totale palet naar hogere of lagere waarden
+    skew = skewness(pixel_value)
+)
+          
+
+
+# because we need to reshape from long to wide format multiple times lets define a function:
+myImgDFReshape = . %>%
+  gather(feature, value, -file, -X, -Y, -color) %>% 
+  unite(feature, color, X, Y, feature) %>% 
+  spread(feature, value)
+
+Sunsets = map_df(sunsets, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "sunsets")
+Trees = map_df(trees, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "trees_and_forest")
+Rivers = map_df(rivers, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "rivers")
+Skies = map_df(skies, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "cloudy_sky")
+
+Train = bind_rows(Sunsets, Trees, Rivers, Skies) %>% ungroup()
+
+set.seed(1)
+
+Train2=Train[,-1]
+
+Train2$category = factor(Train2$category)
+
+#variabelen opschonen op correlaties
+#caret::findCorrelation(Train2[,-352], cutoff = 0.99)
+#Train2<-select(Train2, -caret::findCorrelation(Train2[,-352], cutoff = 0.99))
+
+#model fitting
+ran.for = randomForest(category ~ ., data=Train2, ntry=sqrt(ncol(Train2)))
+
+#accuracy laat overfitting zien lijkt het
+pred.rf = predict(ran.for, newdata =Train2)
+table(truth=Train$category, pred = pred.rf)
+mean(Train$category == pred.rf)
+
+plot(ran.for)
+print(ran.for)
+summary(ran.for)
+getTree(ran.for)
+
+rm(Sunsets)
+rm(Rivers)
+rm(Skies)
+rm(Trees)
+rm(Train)
+rm(Train2)
+}
+
+#testset maken
+Test = map_df(test_set, readJPEG_as_df, featureExtractor = myFeatures) %>% myImgDFReshape() 
+
+#Predictions maken
+
+Predict<-Test %>% ungroup() %>% transmute(file=file, category = predict(ran.for, .))
+write.csv(Predict,'Prediction4.csv', row.names = F)
+
+read.csv('Prediction4.csv')
+
+
+## textual decision tree
+
+
+#Models checken
+fittree = train(category ~ ., Train %>% select(-file), method='rpart', trControl = trainControl('cv', 5), tuneLength=25)
+fittree
+
+options(repr.plot.width=10, repr.plot.height=10)
+plot(fittree$final, compress=T, uniform=T, margin=0.05, branch=.75); 
+text(fittree$final, cex=0.6, all=T, use.n=T)
+
+trcntr <- trainControl('cv', number = 5, p = 0.8)
+fit_knns <- train(category ~ ., Train %>% select(-file), method = "knn", trControl = trcntr, preProcess = 'scale')
+fit_knn <- train(category ~ ., Train %>% select(-file), method = "knn", trControl = trcntr)
+fit_lda <- train(category ~ ., Train %>% select(-file), method = "lda", trControl = trcntr)
+fit_dda <- train(category ~ ., Train %>% select(-file), method = "dda", trControl = trcntr)
+#fit_multi <- nnet::multinom(category ~ ., data = Train) , werkt niet?
+
+
+
+#plot the three models to see which performs best
+models <- list(knns = fit_knns, knn = fit_knn, lda = fit_lda, rpary = fittree, ranfor = ran.for, dda=fit_dda) 
+acc <- sapply(models, function(mdl) max(mdl$results$Accuracy)) 
+barplot(acc, horiz=T, las=1, col = 1 + (acc >= max(acc)))
+
