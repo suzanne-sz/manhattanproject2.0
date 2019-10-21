@@ -62,8 +62,8 @@ readJPEG_as_df <- function(path, featureExtractor = I) {
     featureExtractor
 }
 
-for (i in 3:10){
-nr = nc = i
+
+nr = nc = 8
 myFeatures  <- . %>% # starting with '.' defines the pipe to be a function 
   group_by(file, X=cut(x, nr, labels = FALSE)-1, Y=cut(y, nc, labels=FALSE)-1, color) %>%
   summarise(
@@ -139,14 +139,6 @@ print(ran.for)
 summary(ran.for)
 getTree(ran.for)
 
-rm(Sunsets)
-rm(Rivers)
-rm(Skies)
-rm(Trees)
-rm(Train)
-rm(Train2)
-}
-
 #testset maken
 Test = map_df(test_set, readJPEG_as_df, featureExtractor = myFeatures) %>% myImgDFReshape() 
 
@@ -185,4 +177,78 @@ fit_tree = train(category ~ ., Train %>% select(-file), method='rpart', trContro
 models <- list(knns = fit_knns, knn = fit_knn, lda = fit_lda, tree = fit_tree, boost = fit_boost, rf = fit_rf) 
 acc <- sapply(models, function(mdl) max(mdl$results$Accuracy)) 
 barplot(acc, horiz=T, las=1, col = 1 + (acc >= max(acc)))
+
+#Loop for ideal cut
+for (i in 3:10){
+nr = nc = i
+myFeatures  <- . %>% # starting with '.' defines the pipe to be a function 
+  group_by(file, X=cut(x, nr, labels = FALSE)-1, Y=cut(y, nc, labels=FALSE)-1, color) %>%
+  summarise(
+    m = mean(pixel_value),
+    s = sd(pixel_value),
+    min = min(pixel_value),
+    max = max(pixel_value),
+    q25 = quantile(pixel_value, .25),
+    q75 = quantile(pixel_value, .75),
+    #lag voor verandering
+    #AR = cor(pixel_value, lag(pixel_value), use = "pairwise"),
+    #smalheid van de grootste piek
+    #kur = kurtosis(pixel_value),
+    #lage pixelwaarden voor een kleur
+    #low = length(pixel_value[pixel_value>=.0 & pixel_value<0.33]),
+    #mid pixelwaarden voor kleur
+    #mid = length(pixel_value[pixel_value>=.33 & pixel_value<.66]),
+    #aantal pieken
+    #peakx = length(diff(pixel_value)==0),
+    #scheefheid van het totale palet naar hogere of lagere waarden
+    #skew = skewness(pixel_value)
+)
+          
+
+
+# because we need to reshape from long to wide format multiple times lets define a function:
+myImgDFReshape = . %>%
+  gather(feature, value, -file, -X, -Y, -color) %>% 
+  unite(feature, color, X, Y, feature) %>% 
+  spread(feature, value)
+
+Sunsets = map_df(sunsets, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "sunsets")
+Trees = map_df(trees, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "trees_and_forest")
+Rivers = map_df(rivers, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "rivers")
+Skies = map_df(skies, readJPEG_as_df, featureExtractor = myFeatures) %>% 
+  myImgDFReshape %>%
+  mutate(category = "cloudy_sky")
+
+Train = bind_rows(Sunsets, Trees, Rivers, Skies) %>% ungroup()
+
+set.seed(1)
+
+Train2=Train[,-1]
+
+Train2$category = factor(Train2$category)
+
+#variabelen opschonen op correlaties
+#caret::findCorrelation(Train2[,-352], cutoff = 0.99)
+#Train2<-select(Train2, -caret::findCorrelation(Train2[,-352], cutoff = 0.99))
+
+#model fitting
+ran.for = randomForest(category ~ ., data=Train2, ntry=sqrt(ncol(Train2)))
+
+#accuracy laat overfitting zien lijkt het
+pred.rf = predict(ran.for, newdata =Train2)
+table(truth=Train$category, pred = pred.rf)
+mean(Train$category == pred.rf)
+
+print(i)
+plot(ran.for)
+print(ran.for)
+summary(ran.for)
+getTree(ran.for)
+  }
 
