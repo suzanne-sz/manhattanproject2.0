@@ -245,7 +245,8 @@ Train2$category = factor(Train2$category)
 #Train2<-select(Train2, -caret::findCorrelation(Train2[,-352], cutoff = 0.99))
 
 #model fitting
-ran.for = randomForest(category ~ ., data=Train2, ntry=sqrt(ncol(Train2)))
+ran.for = randomForest(category ~ ., data=Train2, ntry=sqrt(ncol(Train2)), 
+                      ntree = 1000, nodesize = 5, importance = T, na.action=na.omit)
 
 #accuracy laat overfitting zien lijkt het
 pred.rf = predict(ran.for, newdata =Train2)
