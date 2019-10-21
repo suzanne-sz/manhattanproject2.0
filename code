@@ -62,6 +62,14 @@ readJPEG_as_df <- function(path, featureExtractor = I) {
     featureExtractor
 }
 
+# with thanks to group 6: entropy, a measure of “disorder”
+entropy = function(x, nbreaks = nclass.Sturges(x)) {
+  r = range(x)
+  x_binned = findInterval(x, seq(r[1], r[2], len= nbreaks))
+  h = tabulate(x_binned, nbins = nbreaks) # fast histogram
+  p = h/sum(h)
+  -sum(p[p>0] * log(p[p>0]))
+}     
 
 nr = nc = 8
 myFeatures  <- . %>% # starting with '.' defines the pipe to be a function 
@@ -78,20 +86,18 @@ myFeatures  <- . %>% # starting with '.' defines the pipe to be a function
     #smalheid van de grootste piek
     kur = kurtosis(pixel_value),
     #lage pixelwaarden voor een kleur
-    low = length(pixel_value[pixel_value>=.0 & pixel_value<0.33]),
-    #mid pixelwaarden voor kleur
-    mid = length(pixel_value[pixel_value>=.33 & pixel_value<.66]),
-    #hoge pixelwaarden voor kleur
-    high = length(pixel_value[pixel_value>=.66 & pixel_value<1]),
+    low = length(pixel_value[pixel_value>=.0 & pixel_value<0.5]),
     #aantal pieken
     peakx = length(diff(pixel_value)==0),
     #scheefheid van het totale palet naar hogere of lagere waarden
     skew = skewness(pixel_value),
+    #entropy
     entropy = entropy(pixel_value),
-    bimod = as.numeric(diptest::dip.test(pixel_value)$statistic)
+    #bimodality and power from group 6
+    bimod = as.numeric(diptest::dip.test(pixel_value)$statistic),
     power = mean(pixel_value^2)
-
 )
+
           
 
 
@@ -127,7 +133,8 @@ Train2$category = factor(Train2$category)
 #Train2<-select(Train2, -caret::findCorrelation(Train2[,-352], cutoff = 0.99))
 
 #model fitting
-ran.for = randomForest(category ~ ., data=Train2, ntry=sqrt(ncol(Train2)))
+ran.for = randomForest(category ~ ., data=Train2, ntry=sqrt(ncol(Train2)), 
+                      ntree = 1000, nodesize = 5, importance = T, na.action=na.omit)
 
 #accuracy laat overfitting zien lijkt het
 pred.rf = predict(ran.for, newdata =Train2)
